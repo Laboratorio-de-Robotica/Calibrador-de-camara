@@ -1,5 +1,7 @@
 # Calibrador de cámara
 
+<img src="./images/calibrate1.png">
+
 Calibrador de cámara interactivo, en Python, que obtiene la matriz intrínseca y los coeficientes de distorsión.  Para cámaras comunes (estenopéicas, no de gran angular).
 
 Usa el patrón chessboard 9x6:
@@ -55,3 +57,5 @@ Una buena calibración usa entre 40 y 60 fotos.  Se puede reducir a cerca de 20 
 Este documento [Calibración de cámara en Python](https://docs.google.com/document/d/1mIRz3X5iICOr7jhdFvvJbPFms467_l0ha0ozVbz4bts/edit?usp=sharing) describe el desarrollo de este programa.  Bajo el título **Efficient pose** se muestras las mejores poses del patrón para una calibración eficiente.
 
 Para profundizar en el tema se recomiendan las referencias al final de ese documento, y [el tutorial de OpenCV](https://docs.opencv.org/4.x/d4/d94/tutorial_camera_calibration.html)
+
+<img src="./images/Documentos de calibración de cámara.png">
