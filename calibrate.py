@@ -2,14 +2,14 @@ import numpy as np
 import cv2 as cv
 
 print("""
-      Usage:
-      Space: take picture
-      C: calibrate with taken pictures
+      Uso:
+      espacio: captura imagen
+      C: calibra con las imágenes capturadas
       ESC: quit
       """)
 
 ESC = chr(27)
-cv.namedWindow("Detecciones", cv.WINDOW_NORMAL)
+cv.namedWindow("Capturas", cv.WINDOW_NORMAL)
 cv.namedWindow("Cam", cv.WINDOW_NORMAL)
 cv.namedWindow("Tablero", cv.WINDOW_NORMAL)
 defaultPrintOptions = np.get_printoptions()

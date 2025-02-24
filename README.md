@@ -7,8 +7,8 @@ Aplicación de calibración interactiva, en Python, para ejecutar en PC.
 
 Comandos:
 
-* space: grab a picture
-* c: calibrates with grabbed pictures
+* espacio: captura una imagen
+* C: calibra con las imágenes capturadas
 * ESC: quit
 
 Los resultados se muestran en consola.

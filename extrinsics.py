@@ -1,8 +1,45 @@
+"""
+Este módulo contiene una única clase: ExtrinsicCalibrator, que hace las veces de calibrador extrínseco.
+
+Si se ejecuta como programa, corre una demo en vivo sobre la cámara.
+Requiere un patrón de calibración para detectar.
+
+El módulo obtiene la pose y la homografía del patrón de calibración, 
+de modo que sirve para ambos abordajes de cómputo de pose 3D de los objetos en la imagen.
+
+La aplicación primaria es la de una cámara cenital que obtiene la vista superior o en ligera perspectiva
+de la mesa del robot.
+Esta imagen se procesa con detectores que identifican elementos sobre la imagen y sus coordenadas en píxeles.
+La homografía y la pose permiten convertir esas coordenadas en píxeles a coordenadas métricas del mundo, 
+las coordenadas del sistema del robot.
+
+Este calibrador extrínseco obtiene la pose y homografía de un patrón.  
+Si el patrón no coincide con el sistema de referencia del robot (del mundo),
+hace falta una conversión adicional que debe medirse manualmente.  El módulo ``geometricTransforms.py``
+contiene funciones para realizar esta conversión.
+"""
+
 import numpy as np
 import cv2 as cv
 
 class ExtrinsicCalibrator:
+  """
+  Clase para encontrar la homografía a partir de una imagen con un patrón de calibración ajedrez.
+
+  Por lo general los resultados finales e intermedios se guardan en propiedades.
+  Cuando se requiere una imagen, si se omite se toma la última guardada en la propiedad ```self.im```.
+  """
   def __init__(self, chessBoard=(9,6), square_size=25, cameraMatrix=None, distCoeffs=None):
+    """
+    Inicializa el calibrador con parámetros de cámara y del patrón de calibración.
+
+    Args:
+      chessBoard: dimensiones del patrón de calibración ajedrez, preferentemente impar x par.
+      square_size: longitud del lado del cuadrado del patrón de calibración, en las unidades métricas que el usuario elija.
+      cameraMatrix: matriz de cámara de 3x3 obtenida en el proceso de calibración intrínseca, ajeno a este código.  Si no se proporciona no se antidistorsionan las esquinas.
+      distCoeffs: coreficientes de distorsión obtenidos en el proceso de calibración intrínseca, ajeno a este código.  Si no se proporcionan se asumen cero (sin distorsión).
+      
+    """
     self.chessBoard = chessBoard
     self.square_size = square_size
     self.cameraMatrix = cameraMatrix
@@ -12,23 +49,21 @@ class ExtrinsicCalibrator:
     self.chessboardPointCloud3D = np.zeros((self.chessBoard[0]*self.chessBoard[1],3), np.float32)
     self.chessboardPointCloud3D[:,:2] = np.mgrid[0:self.chessBoard[0],0:self.chessBoard[1]].T.reshape(-1,2)
 
-  def findCorners(self, im):
-    '''
-    Finds the chessboard corners in the image, with subpixel precision.
-    If the camera matrix and distortion coefficients are provided, the corners are undistorted.
-    Results are stored in self.chessboardFound, self.corners, self.im and self.imGray.
-    If image is not provided, it returns immediately leaving previous results untouched.
-    Returns chessboardFound flag
-    '''
-    if im is None:
-      return
-    
-    self.im = im
-    self.Hwc = None
-    self.tvecs = None
-    self.rvecs = None
-    self.Tcw = None
-    
+  def findCorners(self, im:np.ndarray)->bool:
+    """
+    Detecta las esquinas del patrón de calibración ajedrez en la imagen, con precisión subpíxel.
+
+    - Si se proporcionan los coeficientes de distorsión, las esquinas se antidistorsionan.
+    - Los resultados se guardan en ```self.chessboardFound, self.corners, self.im y self.imGray```.
+    - Si no se proporciona una imagen, retorna inmediatamente sin hacer nada preservando los resultados anteriores.
+
+    Args:
+      im (np.ndarray): imagen de la cámara en la que se buscará el patrón de calibración
+
+    Returns:
+      chessboardFound flag
+
+    """
     self.imGray = cv.cvtColor(im, cv.COLOR_BGR2GRAY)
     self.chessboardFound, corners = cv.findChessboardCorners(self.imGray, self.chessBoard, None)
     if self.chessboardFound:
@@ -38,65 +73,74 @@ class ExtrinsicCalibrator:
     self.corners = corners
     return self.chessboardFound
   
-  def drawCorners(self, im=None):
-    '''
-    Draws the chessboard corners in the image.
-    If the image is not provided, it uses the last results from image stored in self.im.
-    '''
-    if im is None:
-       im = self.im
+  def drawCorners(self, im:np.ndarray)->np.ndarray:
+    """
+    Anota las esquinas del patrón ajedrez en la imagen.
+
+    Args:
+      im (np.ndarray): Imagen de entrada sobre la que se realizarán las anotaciones.
+
+    Returns:
+      la imagen anotada.
+
+    """
     if self.chessboardFound:
       cv.drawChessboardCorners(im, self.chessBoard, self.corners, self.chessboardFound)
     return im
   
-  def computeHwc(self):
-    '''
-    Finds the homography between the chessboard corners and the 3D chessboard points.
-    If the image is not provided, it uses the last results from image stored in self.im.
-    Returns Hwc, wich can be an empty matrix if the homography is not found.
-    Returns None if the corners are not found.
-    '''
+  def computeHwc(self)->np.ndarray | None:
+    """
+    Computa la homografía entre las esquinas del patrón en la imagen 
+    y las coordenadas 3D de esas esquinas en el patrón.
+
+    Returns:
+      La homografía Hwc que transforma píxeles de la imagen en coordenadas métricas del mundo.
+      Si no se logra computar la homografía la matriz estará vacía.
+
+      None si no se encontraron las esquinas del patrón.
+
+    """
     if not self.chessboardFound:
       return None
     
-    self.Hwc, _ = cv.findHomography(self.corners, self.chessboardPointCloud3D)
-    return self.Hwc
+    Hwc, _ = cv.findHomography(self.corners, self.chessboardPointCloud3D)
+    return Hwc
 
-  def getHviz(self, scaleFactor=1.0, translation=(0,0)):
-    '''
-    Returns a visualization of the homography, with the chessboard points projected in the image.
-    scaleFactor: scales the chessboard points
-    translation: where to translate the origin
-    '''
-    if self.Hwc is None:
-      return None
+  def computePose(self)->tuple[np.ndarray, np.ndarray, np.ndarray] | tuple[None, None, None]:
+    """
+    De la homografía extrae la pose 3D y la expresa de dos maneras:
     
-    Htransform = np.identity(3)
-    Htransform[:2, 2] = translation	# t es el vector traslación del origen
-    Htransform[2, 2] = 1/scaleFactor	# k es el factor de escala
-    self.Hviz = Htransform @ self.Hwc
-    return self.Hviz
+    - como Tcw, la matriz de 4x4 en coordenadas homogéneas
+    - en notación Rodrigues: vectores traslación y rotación
 
+    Returns:
+      rvecs
+      tvecs
+      Tcw
 
-  def computePose(self):
+    """
     if self.cameraMatrix is None:
+       print('Sin la matriz intrínseca de la cámara no se puede calcular la pose.')
        return None, None, None
     
     if not self.chessboardFound:
+      print('No se detectó el patrón y no se puede calcular la pose.')
       return None, None, None
  
-    retval, self.rvecs, self.tvecs = cv.solvePnP(self.chessboardPointCloud3D, self.corners, self.cameraMatrix, self.distCoeffs)
+    retval, rvecs, tvecs = cv.solvePnP(self.chessboardPointCloud3D, self.corners, self.cameraMatrix, self.distCoeffs)
     if not retval:
+      print('solvePnP falló en calcular la pose.')
       return None, None, None
 
-    Rcw, _ = cv.Rodrigues(self.rvecs)
-    self.Tcw = np.hstack((Rcw, self.tvecs))
-    self.Tcw = np.vstack((self.Tcw, [0,0,0,1]))
+    Rcw, _ = cv.Rodrigues(rvecs)
+    Tcw = np.hstack((Rcw, tvecs))
+    Tcw = np.vstack((Tcw, [0,0,0,1]))
 
-    return self.rvecs, self.tvecs, self.Tcw
+    return rvecs, tvecs, Tcw
     
 
 if(__name__ == '__main__'):
+  import geometricTransforms as gt
   print("""
         Usage:
         SPACE: compute H and pose
@@ -125,7 +169,6 @@ if(__name__ == '__main__'):
       [0.0, f, cy],
       [0.0, 0.0, 1.0]], np.float32)
 
-  #calibrator = ExtrinsicCalibrator() # don't use cameraMatrix
   calibrator = ExtrinsicCalibrator(cameraMatrix=cameraMatrix) # use fake cameraMatrix
 
   while True:
@@ -133,8 +176,10 @@ if(__name__ == '__main__'):
     if ret:
       imLowRes = cv.resize(im, newSize)
       if calibrator.findCorners(imLowRes):
-        calibrator.computeHwc()
-        Hviz = calibrator.getHviz(scaleFactor=25.0, translation=(5,5))
+        Hwc = calibrator.computeHwc()
+
+        # Transformación arbitraria para visualización
+        Hviz = gt.scaleAndTranslateH(Hwc, scaleFactor=25.0, translation=(5,5))
         imFrontal = cv.warpPerspective(imLowRes, Hviz, (im.shape[1], im.shape[0]))
         cv.imshow('Frontal', imFrontal)
         imLowRes = calibrator.drawCorners()
@@ -150,16 +195,17 @@ if(__name__ == '__main__'):
           # Calcula parámetros extrínsecos
           calibrator.findCorners(im)
           if not calibrator.chessboardFound:
+            print('No se detectó el patrón')
             continue
-          calibrator.computeHwc()
-          calibrator.computePose()
+          Hwc = calibrator.computeHwc()
+          rvecs, tvecs, Tcw = calibrator.computePose()
 
           # Muestra resultados
           np.set_printoptions(precision=2, suppress=True)
-          print("Matriz Hwc", calibrator.Hwc)
-          print("rvecs", calibrator.rvecs)
-          print("tvecs", calibrator.tvecs)
-          print("Tcw", calibrator.Tcw)
+          print("Matriz Hwc", Hwc)
+          print("rvecs", rvecs)
+          print("tvecs", tvecs)
+          print("Tcw", Tcw)
           np.set_printoptions(**defaultPrintOptions)
 
         case 'v':
