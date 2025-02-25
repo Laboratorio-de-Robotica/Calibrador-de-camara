@@ -1,3 +1,6 @@
+Calibrador de cámara
+====================
+
 .. toctree::
   :maxdepth: 4
   :caption: Contenido
@@ -6,3 +9,5 @@
   extrinsics_doc
   extrinsics
   geometricTransforms
+
+.. note:: `Repositorio en GitHub <https://github.com/Laboratorio-de-Robotica/Calibrador-de-camara>`_
