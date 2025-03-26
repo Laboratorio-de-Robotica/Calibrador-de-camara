@@ -9,5 +9,6 @@ Calibrador de cámara
   extrinsics_doc
   extrinsics
   geometricTransforms
+  ring_calibration_doc
 
 .. note:: `Repositorio en GitHub <https://github.com/Laboratorio-de-Robotica/Calibrador-de-camara>`_
