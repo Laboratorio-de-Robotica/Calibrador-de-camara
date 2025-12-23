@@ -36,3 +36,5 @@ html_static_path = ['_static']
 
 # Lista de módulos que no estarán disponibles al documentar
 html_show_sourcelink = False
+
+autodoc_mock_imports = ["cv2"]
