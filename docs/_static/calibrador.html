@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Calibrador de Cámara Web</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1e1e24;
+            color: #f5f5f7;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        h1 { margin-bottom: 10px; color: #00adb5; }
+        .status {
+            background-color: #393e46;
+            padding: 10px 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            justify-content: center;
+            max-width: 1400px;
+        }
+        .window-box {
+            background-color: #222831;
+            border: 2px solid #393e46;
+            border-radius: 8px;
+            padding: 10px;
+            text-align: center;
+        }
+        .window-box h3 { margin-top: 0; color: #eeeeee; }
+        canvas, video {
+            background-color: #000;
+            border-radius: 4px;
+            max-width: 100%;
+            height: auto;
+        }
+        #webcam { display: none; } 
+        
+        .controls {
+            margin-top: 20px;
+            display: flex;
+            gap: 15px;
+        }
+        button {
+            background-color: #00adb5;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:hover { background-color: #007c82; }
+        button:disabled { background-color: #555; cursor: not-allowed; }
+        
+        #console-out {
+            width: 100%;
+            max-width: 800px;
+            height: 150px;
+            background-color: #000;
+            color: #00ff00;
+            font-family: monospace;
+            padding: 10px;
+            margin-top: 20px;
+            border-radius: 6px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Calibrador de Cámara (OpenCV.js)</h1>
+    <div id="status" class="status">⏳ Cargando OpenCV.js... Por favor espera.</div>
+
+    <div class="container">
+        <video id="webcam" width="640" height="480" autoplay playsinline></video>
+
+        <div class="window-box">
+            <h3>Ventana: Cam</h3>
+            <canvas id="canvasCam" width="640" height="480"></canvas>
+        </div>
+
+        <div class="window-box">
+            <h3>Ventana: Detecciones</h3>
+            <canvas id="canvasDetecciones" width="640" height="480"></canvas>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button id="btnCapture" disabled>Espacio (Capturar Imagen)</button>
+        <button id="btnCalibrate" disabled>C (Calibrar)</button>
+    </div>
+
+    <h3>Consola de Salida:</h3>
+    <div id="console-out">Iniciando sistema...<br></div>
+
+    <script async src="https://docs.opencv.org/4.10.0/opencv.js" type="text/javascript" id="opencv-script"></script>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const canvasCam = document.getElementById('canvasCam');
+        const canvasDet = document.getElementById('canvasDetecciones');
+        const ctxDet = canvasDet.getContext('2d');
+        
+        const btnCapture = document.getElementById('btnCapture');
+        const btnCalibrate = document.getElementById('btnCalibrate');
+        const statusDiv = document.getElementById('status');
+        const consoleOut = document.getElementById('console-out');
+
+        const chessBoard = { cols: 9, rows: 6 }; 
+        const gradualDarkness = 0.90;
+        
+        let imgPoints = [];
+        let objPoints = [];
+        let src, gray, corners, boardSize;
+        let p3DArray = [];
+
+        for (let i = 0; i < chessBoard.rows; i++) {
+            for (let j = 0; j < chessBoard.cols; j++) {
+                p3DArray.push(j, i, 0);
+            }
+        }
+
+        function logToConsole(text) {
+            consoleOut.innerHTML += text + "<br>";
+            consoleOut.scrollTop = consoleOut.scrollHeight;
+        }
+
+        document.getElementById('opencv-script').addEventListener('load', () => {
+            statusDiv.innerHTML = "✅ OpenCV.js Listo. Iniciando Cámara...";
+            statusDiv.style.backgroundColor = "#28a745";
+            initCamera();
+        });
+
+        function initCamera() {
+            navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: false })
+                .then(function(stream) {
+                    video.srcObject = stream;
+                    video.play();
+                    
+                    src = new cv.Mat(video.height, video.width, cv.CV_8UC4);
+                    gray = new cv.Mat();
+                    corners = new cv.Mat();
+                    boardSize = new cv.Size(chessBoard.cols, chessBoard.rows);
+
+                    ctxDet.fillStyle = "black";
+                    ctxDet.fillRect(0, 0, canvasDet.width, canvasDet.height);
+
+                    btnCapture.disabled = false;
+                    btnCalibrate.disabled = false;
+                    statusDiv.innerHTML = "🎥 Cámara activa. Clon de calibrador listo.";
+
+                    window.addEventListener('keydown', handleKeyDown);
+                    btnCapture.onclick = () => processCapture();
+                    btnCalibrate.onclick = () => processCalibration();
+
+                    setTimeout(processVideo, 33);
+                })
+                .catch(function(err) {
+                    logToConsole("Error al acceder a la cámara: " + err);
+                    statusDiv.innerHTML = "❌ Error de Cámara (¿Estás abriendo el archivo local sin servidor?)";
+                    statusDiv.style.backgroundColor = "#dc3545";
+                });
+        }
+
+        function processVideo() {
+            if (!video.srcObject) return;
+
+            let ctxCam = canvasCam.getContext('2d');
+            ctxCam.drawImage(video, 0, 0, canvasCam.width, canvasCam.height);
+            
+            src.data.set(ctxCam.getImageData(0, 0, canvasCam.width, canvasCam.height).data);
+            
+            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+            
+            let patternFound = cv.findChessboardCorners(gray, boardSize, corners, cv.CALIB_CB_ADAPTIVE_THRESH + cv.CALIB_CB_NORMALIZE_IMAGE);
+            
+            if (patternFound) {
+                cv.drawChessboardCorners(src, boardSize, corners, patternFound);
+            }
+
+            cv.imshow('canvasCam', src);
+
+            requestAnimationFrame(processVideo);
+        }
+
+        function processCapture() {
+            let snapGray = new cv.Mat();
+            cv.cvtColor(src, snapGray, cv.COLOR_RGBA2GRAY);
+            let snapCorners = new cv.Mat();
+            
+            let found = cv.findChessboardCorners(snapGray, boardSize, snapCorners, cv.CALIB_CB_ADAPTIVE_THRESH + cv.CALIB_CB_FAST_CHECK);
+            
+            if (found) {
+                let criteria = new cv.TermCriteria(cv.TermCriteria_EPS + cv.TermCriteria_MAX_ITER, 30, 0.001);
+                cv.cornerSubPix(snapGray, snapCorners, new cv.Size(11, 11), new cv.Size(-1, -1), criteria);
+
+                imgPoints.push(snapCorners.clone());
+                
+                let objMat = cv.matFromArray(chessBoard.cols * chessBoard.rows, 1, cv.CV_32FC3, p3DArray);
+                objPoints.push(objMat);
+
+                ctxDet.globalAlpha = 1 - gradualDarkness;
+                ctxDet.fillStyle = "black";
+                ctxDet.fillRect(0, 0, canvasDet.width, canvasDet.height);
+                ctxDet.globalAlpha = 1.0;
+
+                let tempMat = new cv.Mat.zeros(canvasDet.height, canvasDet.width, cv.CV_8UC4);
+                cv.drawChessboardCorners(tempMat, boardSize, snapCorners, found);
+                
+                let tempCanvas = document.createElement('canvas');
+                tempCanvas.width = canvasDet.width;
+                tempCanvas.height = canvasDet.height;
+                cv.imshow(tempCanvas, tempMat);
+                ctxDet.drawImage(tempCanvas, 0, 0);
+
+                logToConsole(`📸 ${imgPoints.length} capturas registradas exitosamente.`);
+                
+                tempMat.delete();
+                tempCanvas.remove();
+            } else {
+                logToConsole("⚠️ No se detectó el tablero claramente. Intentá de nuevo.");
+            }
+            snapGray.delete();
+            snapCorners.delete();
+        }
+
+        function processCalibration() {
+            if (imgPoints.length < 3) {
+                logToConsole("❌ Se necesitan al menos 3 capturas válidas para calibrar.");
+                return;
+            }
+
+            logToConsole("⏳ Calibrando... Esto puede congelar la pestaña un segundo.");
+
+            let k = new cv.Mat.zeros(3, 3, cv.CV_64F);
+            let distCoef = new cv.Mat();
+            let rvecs = new cv.MatVector();
+            let tvecs = new cv.MatVector();
+            
+            let objectPointsVector = new cv.MatVector();
+            let imagePointsVector = new cv.MatVector();
+            
+            for (let i = 0; i < objPoints.length; i++) {
+                objectPointsVector.push_back(objPoints[i]);
+                imagePointsVector.push_back(imgPoints[i]);
+            }
+
+            let imageSize = new cv.Size(canvasCam.width, canvasCam.height);
+            let rms = cv.calibrateCamera(objectPointsVector, imagePointsVector, imageSize, k, distCoef, rvecs, tvecs);
+
+            logToConsole("=====================================");
+            logToConsole(`✅ Calibración finalizada con éxito. Error RMS: ${rms.toFixed(4)}`);
+            logToConsole("-------------------------------------");
+            logToConsole("Matriz K (Intrínseca):");
+            logToConsole(`[ ${k.doubleAt(0,0).toFixed(2)},  ${k.doubleAt(0,1).toFixed(2)},  ${k.doubleAt(0,2).toFixed(2)} ]`);
+            logToConsole(`[ ${k.doubleAt(1,0).toFixed(2)},  ${k.doubleAt(1,1).toFixed(2)},  ${k.doubleAt(1,2).toFixed(2)} ]`);
+            logToConsole(`[ ${k.doubleAt(2,0).toFixed(2)},  ${k.doubleAt(2,1).toFixed(2)},  ${k.doubleAt(2,2).toFixed(2)} ]`);
+            logToConsole("-------------------------------------");
+            
+            let distStr = "";
+            for (let i = 0; i < distCoef.rows * distCoef.cols; i++) {
+                distStr += distCoef.doubleAt(i).toFixed(5) + "  ";
+            }
+            logToConsole("Coeficientes de Distorsión:");
+            logToConsole(distStr);
+            logToConsole("=====================================");
+
+            k.delete(); distCoef.delete(); rvecs.delete(); tvecs.delete();
+            objectPointsVector.delete(); imagePointsVector.delete();
+        }
+
+        function handleKeyDown(e) {
+            if (e.key === ' ') {
+                e.preventDefault();
+                processCapture();
+            } else if (e.key.toLowerCase() === 'c') {
+                processCalibration();
+            }
+        }
+    </script>
+</body>
+</html>
